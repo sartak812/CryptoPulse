@@ -1,11 +1,9 @@
-## Application UI
-
-![UI Dashboard](Screenshots/UI%20Dashboard.jpg)
-![UI Error API](Screenshots/UI%20Error%20API.jpg)
-
 # CryptoPulse
 
 Lightweight Flask API that fetches data from CoinGecko and stores crypto snapshots in SQLite every five minutes.
+
+![UI Dashboard](Screenshots/UI%20Dashboard.jpg)
+
 
 ## Quick Start (Docker Compose)
 
