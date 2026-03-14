@@ -51,8 +51,8 @@ APP_ENV = os.getenv("APP_ENV")
 API_KEY = os.getenv("API_KEY")
 # Read database path from environment for flexible local/docker setup.
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/crypto.db")
-# Read autosave interval (seconds). Default is 3 minutes.
-AUTO_SAVE_INTERVAL_SECONDS = int(os.getenv("AUTO_SAVE_INTERVAL_SECONDS", "180"))
+# Read autosave interval (seconds). Default is 5 minutes.
+AUTO_SAVE_INTERVAL_SECONDS = int(os.getenv("AUTO_SAVE_INTERVAL_SECONDS", "300"))
 # Define source label for background snapshots.
 AUTO_SAVE_SOURCE = "auto"
 
