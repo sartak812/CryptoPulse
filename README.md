@@ -15,14 +15,14 @@ docker compose up --build -d
 
 2. Check app:
 
-- http://127.0.0.1:5000/api/v1/health
-- http://127.0.0.1:5000/api/v1/crypto
+- http://127.0.0.1:5000/api/v1/health //output JSON
+- http://127.0.0.1:5000/api/v1/crypto //output JSON
 - http://127.0.0.1:5000/api/v1/dashboard
 
 3. Stop app:
 
 ```shell
-docker compose down -v 
+docker compose down
 ```
 
 ## Database
