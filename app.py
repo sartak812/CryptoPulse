@@ -1,6 +1,8 @@
 ## Import OS utilities to read and set environment variables.
 import os
 import sqlite3
+import threading
+import time
 # Import Path helper for safe file path operations.
 from pathlib import Path
 from datetime import datetime, timezone
@@ -49,6 +51,14 @@ APP_ENV = os.getenv("APP_ENV")
 API_KEY = os.getenv("API_KEY")
 # Read database path from environment for flexible local/docker setup.
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/crypto.db")
+# Read autosave interval (seconds). Default is 3 minutes.
+AUTO_SAVE_INTERVAL_SECONDS = int(os.getenv("AUTO_SAVE_INTERVAL_SECONDS", "180"))
+# Define source label for background snapshots.
+AUTO_SAVE_SOURCE = "auto"
+
+# Store background worker state to avoid starting it more than once per process.
+_auto_writer_started = False
+_auto_writer_lock = threading.Lock()
 
 
 # Define helper that opens a new SQLite connection per request or action.
@@ -124,20 +134,166 @@ def row_to_result(row):
     }
 
 
+# Define helper that fetches current prices from CoinGecko.
+def fetch_crypto_prices():
+    # Define upstream CoinGecko simple price API URL.
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    # Define request query parameters for required coins and currency.
+    params = {"ids": "bitcoin,ethereum,litecoin", "vs_currencies": "usd"}
+    # Send GET request to upstream API with headers and timeout.
+    resp = requests.get(
+        # Pass upstream endpoint URL.
+        url,
+        # Pass query string parameters.
+        params=params,
+        # Pass explicit headers for clarity and API friendliness.
+        headers={"Accept": "application/json", "User-Agent": "crypto-pulse/1.0"},
+        # Fail request if upstream does not respond in 10 seconds.
+        timeout=10,
+    )
+    # Validate HTTP status before parsing body.
+    if resp.status_code != 200:
+        raise ValueError(f"Upstream API returned status {resp.status_code}")
+
+    # Parse upstream JSON body into Python dictionary.
+    data = resp.json()
+    # Extract Bitcoin price in USD.
+    btc_usd = data.get("bitcoin", {}).get("usd")
+    # Extract Ethereum price in USD.
+    eth_usd = data.get("ethereum", {}).get("usd")
+    # Extract Litecoin price in USD.
+    ltc_usd = data.get("litecoin", {}).get("usd")
+    # Validate that all required price fields are present.
+    if btc_usd is None or eth_usd is None or ltc_usd is None:
+        raise ValueError("Public API response did not include expected fields.")
+
+    # Return 3 normalized numeric values.
+    return float(btc_usd), float(eth_usd), float(ltc_usd)
+
+
+# Define helper that persists one crypto snapshot and returns saved payload metadata.
+def save_crypto_snapshot(btc_usd, eth_usd, ltc_usd, source="manual"):
+    # Compute derived metrics from the provided three prices.
+    metrics = build_metrics(btc_usd, eth_usd, ltc_usd)
+    # Normalize optional source label and limit max length.
+    source = str(source or "manual")[:50]
+    # Create UTC timestamp string for DB row.
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    # Open DB connection for INSERT operation.
+    conn = get_db_connection()
+    # Ensure connection closes even if SQL fails.
+    try:
+        # Insert one snapshot row and receive assigned id.
+        cursor = conn.execute(
+            """
+            INSERT INTO crypto_results (
+                bitcoin_usd,
+                ethereum_usd,
+                litecoin_usd,
+                average_usd,
+                spread_usd,
+                highest,
+                source,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                btc_usd,
+                eth_usd,
+                ltc_usd,
+                metrics["average_usd"],
+                metrics["spread_usd"],
+                metrics["highest"],
+                source,
+                created_at,
+            ),
+        )
+        # Persist insert transaction.
+        conn.commit()
+        # Read generated row id from insert cursor.
+        created_id = cursor.lastrowid
+    finally:
+        # Close DB connection.
+        conn.close()
+
+    # Return persisted snapshot metadata.
+    return {
+        "id": created_id,
+        "metrics": metrics,
+        "source": source,
+        "created_at": created_at,
+    }
+
+
+# Define background loop that auto-saves snapshots every N seconds.
+def auto_save_crypto_loop():
+    # Repeat indefinitely while process is running.
+    while True:
+        try:
+            # Fetch latest prices from upstream.
+            btc_usd, eth_usd, ltc_usd = fetch_crypto_prices()
+            # Save fetched prices into sqlite with "auto" source label.
+            save_crypto_snapshot(btc_usd, eth_usd, ltc_usd, source=AUTO_SAVE_SOURCE)
+        except (requests.RequestException, ValueError, sqlite3.Error) as exc:
+            # Keep service alive even when one autosave cycle fails.
+            app.logger.warning("Auto-save cycle failed: %s", exc)
+        # Wait configured interval before next cycle.
+        time.sleep(AUTO_SAVE_INTERVAL_SECONDS)
+
+
+# Define one-time starter for the background auto-save worker.
+def ensure_auto_writer_started():
+    # Read global worker state.
+    global _auto_writer_started
+    # Fast-path return when thread is already running.
+    if _auto_writer_started:
+        return
+    # Serialize startup so parallel requests do not spawn duplicate threads.
+    with _auto_writer_lock:
+        # Re-check flag after lock acquisition.
+        if _auto_writer_started:
+            return
+        # Start daemon thread so process can exit cleanly.
+        thread = threading.Thread(
+            target=auto_save_crypto_loop,
+            name="crypto-auto-writer",
+            daemon=True,
+        )
+        thread.start()
+        # Mark worker as started for this process.
+        _auto_writer_started = True
+
+
 # Initialize the sqlite schema at startup so routes can use DB immediately.
 init_db()
+
+
+# Start background jobs as soon as server starts serving requests.
+if hasattr(app, "before_serving"):
+    @app.before_serving
+    def start_background_jobs():
+        # Ensure auto-save thread starts only once per process.
+        ensure_auto_writer_started()
+else:
+    # Fallback for environments where before_serving hook is unavailable.
+    @app.before_request
+    def start_background_jobs():
+        # Ensure auto-save thread starts only once per process.
+        ensure_auto_writer_started()
 
 
 # Register route for root URL.
 @app.get("/")
 # Define handler that redirects users to the dashboard endpoint.
 def home():
-    # Redirect to function named "index" (route /api/v1/data).
+    # Redirect to function named "index" (route /api/v1/dashboard).
     return redirect(url_for("index"))
 
 
 # Register route for the dashboard page.
-@app.get("/api/v1/data")
+@app.get("/api/v1/dashboard")
 # Define handler that returns HTML UI.
 def index():
     # Return inline HTML template as a Flask response.
@@ -460,23 +616,10 @@ def health():
 @app.get("/api/v1/crypto")
 # Define endpoint that proxies CoinGecko data and computes metrics.
 def crypto():
-    # Define upstream CoinGecko simple price API URL.
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    # Define request query parameters for required coins and currency.
-    params = {"ids": "bitcoin,ethereum,litecoin", "vs_currencies": "usd"}
     # Begin protected request block to catch network-related failures.
     try:
-        # Send GET request to upstream API with headers and timeout.
-        resp = requests.get(
-            # Pass upstream endpoint URL.
-            url,
-            # Pass query string parameters.
-            params=params,
-            # Pass explicit headers for clarity and API friendliness.
-            headers={"Accept": "application/json", "User-Agent": "crypto-pulse/1.0"},
-            # Fail request if upstream does not respond in 10 seconds.
-            timeout=10,
-        )
+        # Fetch normalized upstream prices from shared helper.
+        btc_usd, eth_usd, ltc_usd = fetch_crypto_prices()
     # Catch connection, timeout, DNS, and other request exceptions.
     except requests.RequestException:
         # Return structured JSON error with bad gateway status.
@@ -492,33 +635,8 @@ def crypto():
             502,
         )
 
-    # Check if upstream response is not successful.
-    if resp.status_code != 200:
-        # Return structured error describing non-200 upstream status.
-        return (
-            # Create error payload.
-            jsonify(
-                # Short error category.
-                error="Upstream API error",
-                # Human-readable message for UI clients.
-                message="Public API returned a non-200 status.",
-                # Include upstream status code for debugging.
-                status_code=resp.status_code,
-            ),
-            # Mark failure as upstream dependency issue.
-            502,
-        )
-
-    # Parse upstream JSON body into Python dictionary.
-    data = resp.json()
-    # Extract Bitcoin price in USD.
-    btc_usd = data.get("bitcoin", {}).get("usd")
-    # Extract Ethereum price in USD.
-    eth_usd = data.get("ethereum", {}).get("usd")
-    # Extract Litecoin price in USD.
-    ltc_usd = data.get("litecoin", {}).get("usd")
-    # Validate that all required price fields are present.
-    if btc_usd is None or eth_usd is None or ltc_usd is None:
+    # Catch unexpected but parseable upstream payload/content issues.
+    except ValueError:
         # Return error when expected fields are missing from upstream response.
         return (
             # Create error payload.
@@ -589,65 +707,28 @@ def create_crypto_result():
             400,
         )
 
-    # Compute derived metrics from the provided three prices.
-    metrics = build_metrics(btc_usd, eth_usd, ltc_usd)
-    # Read optional source label from payload for traceability.
-    source = str(payload.get("source", "manual"))[:50]
-    # Create UTC timestamp string for DB row.
-    created_at = datetime.now(timezone.utc).isoformat()
-
-    # Open DB connection for INSERT operation.
-    conn = get_db_connection()
-    # Ensure connection closes even if SQL fails.
-    try:
-        # Insert one snapshot row and receive assigned id.
-        cursor = conn.execute(
-            """
-            INSERT INTO crypto_results (
-                bitcoin_usd,
-                ethereum_usd,
-                litecoin_usd,
-                average_usd,
-                spread_usd,
-                highest,
-                source,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                btc_usd,
-                eth_usd,
-                ltc_usd,
-                metrics["average_usd"],
-                metrics["spread_usd"],
-                metrics["highest"],
-                source,
-                created_at,
-            ),
-        )
-        # Persist insert transaction.
-        conn.commit()
-        # Read generated row id from insert cursor.
-        created_id = cursor.lastrowid
-    finally:
-        # Close DB connection.
-        conn.close()
+    # Persist row to DB via shared insert helper.
+    saved = save_crypto_snapshot(
+        btc_usd,
+        eth_usd,
+        ltc_usd,
+        source=payload.get("source", "manual"),
+    )
 
     # Return inserted row summary to client.
     return (
         jsonify(
-            id=created_id,
+            id=saved["id"],
             prices={
                 "bitcoin_usd": btc_usd,
                 "ethereum_usd": eth_usd,
                 "litecoin_usd": ltc_usd,
             },
-            spread_usd=metrics["spread_usd"],
-            average_usd=metrics["average_usd"],
-            highest=metrics["highest"],
-            source=source,
-            created_at=created_at,
+            spread_usd=saved["metrics"]["spread_usd"],
+            average_usd=saved["metrics"]["average_usd"],
+            highest=saved["metrics"]["highest"],
+            source=saved["source"],
+            created_at=saved["created_at"],
         ),
         201,
     )
@@ -704,4 +785,4 @@ def list_crypto_results():
 # Check whether this module is being run directly.
 if __name__ == "__main__":
     # Start Flask development server with debug mode enabled.
-    app.run(debug=True)
+    app.run(host="0.0.0.0", debug=True)
