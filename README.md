@@ -27,13 +27,10 @@ docker compose down -v
 SQLite file path in container: `/app/data/crypto.db`.
 Table: `crypto_results`.
 
-## Main Endpoints
+## Database Endpoints
 
-- `GET /api/v1/health`
-- `GET /api/v1/crypto`
-- `GET /api/v1/dashboard`
-- `POST /api/v1/crypto/results`
-- `GET /api/v1/crypto/results?limit=20`
+- `POST /api/v1/crypto/results`  //write the current record manually 
+- `GET /api/v1/crypto/results?limit=20` //read the last 20 records
 
 
 ## Example CRUD Requests
