@@ -1,3 +1,0 @@
-# Practice Homework 5 — Mini Fail2Ban
-
-This project simulates a simplified Fail2Ban workflow in pure Python. The script `fail2ban.py` loads a list of login attempts, counts how many times each IP address fails, and blocks any IP with three or more failures. The `block_ip()` function uses a while loop to mimic pushing that IP into three firewalls, while `analyze_logs()` iterates through the logs, builds a failure counter dictionary, and collects all IPs that should be banned. Running the script prints the simulated blocking steps and returns the list of banned IPs so you can extend it with real firewall commands later.
