@@ -2,30 +2,7 @@
 
 Flask API for crypto prices with PostgreSQL persistence, deployed as a 3-container Docker Compose stack behind Nginx.
 
-## Image Optimization
-
-The project uses a multi-stage Docker build:
-- `builder` stage installs Python dependencies into `/opt/venv`.
-- `runtime` stage copies only the ready virtualenv + app code.
-
-Why it matters:
-- smaller runtime image size
-- faster pull/start in CI/CD and cloud
-- reduced attack surface (no build tooling in final image)
-
-### Size Comparison
-
-Measured on March 28, 2026 with:
-
-```bash
-docker build -f Dockerfile.single -t cryptopulse:single .
-docker build -t cryptopulse:optimized .
-docker images | grep cryptopulse
-```
-
-Result:
-- Original image (`cryptopulse:single`): `168MB`
-- Multi-stage image (`cryptopulse:optimized`): `168MB`
+![UI Dashboard](Screenshots/UI%20Dashboard.jpg)
 
 ## Architecture Summary
 
