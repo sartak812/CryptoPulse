@@ -1,20 +1,32 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 # Keep logs unbuffered and disable .pyc generation inside container.
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV VENV_PATH=/opt/venv
 
 WORKDIR /app
 
-# Install Python dependencies first to leverage Docker layer caching.
+# Build dependencies in isolated virtual environment.
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m venv ${VENV_PATH} \
+    && ${VENV_PATH}/bin/pip install --no-cache-dir --upgrade pip \
+    && ${VENV_PATH}/bin/pip install --no-cache-dir -r requirements.txt
 
-# Copy project files into container image.
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV VENV_PATH=/opt/venv
+ENV PATH="${VENV_PATH}/bin:${PATH}"
+
+WORKDIR /app
+
+# Copy prebuilt environment from builder stage.
+COPY --from=builder ${VENV_PATH} ${VENV_PATH}
+
+# Copy project files into runtime image.
 COPY . .
-
-# Ensure directory for sqlite file exists in the container filesystem.
-RUN mkdir -p /app/data
 
 # Expose Flask port.
 EXPOSE 5000

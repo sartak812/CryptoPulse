@@ -2,15 +2,50 @@ services:
   crypto-api:
     build: .
     container_name: crypto-pulse-api
-    ports:
-      - "5000:5000"
     environment:
-      # SQLite file is stored in mounted /app/data volume.
-      DATABASE_PATH: /app/data/crypto.db
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cryptopulse
       APP_ENV: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crypto-net
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: crypto-pulse-postgres
+    environment:
+      POSTGRES_DB: cryptopulse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cryptopulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     volumes:
-      - sqlite_data:/app/data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - crypto-net
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: crypto-pulse-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - crypto-api
+    networks:
+      - crypto-net
     restart: unless-stopped
 
 volumes:
-  sqlite_data:
+  postgres_data:
+
+networks:
+  crypto-net:
+    driver: bridge
