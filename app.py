@@ -2,6 +2,7 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg2
 import requests
@@ -693,4 +694,4 @@ def list_crypto_results():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", debug=True)
+    app.run(host="0.0.0.0", debug=APP_ENV == "development")
