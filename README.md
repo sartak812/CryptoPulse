@@ -1,73 +1,74 @@
 # CryptoPulse
 
-Lightweight Flask API that fetches data from CoinGecko and stores crypto snapshots in SQLite every five minutes.
+Flask API for crypto prices with PostgreSQL persistence, deployed as a 3-container Docker Compose stack behind Nginx.
 
-![UI Dashboard](Screenshots/UI%20Dashboard.jpg)
+## Image Optimization
 
+The project uses a multi-stage Docker build:
+- `builder` stage installs Python dependencies into `/opt/venv`.
+- `runtime` stage copies only the ready virtualenv + app code.
 
-## Quick Start (Docker Compose)
+Why it matters:
+- smaller runtime image size
+- faster pull/start in CI/CD and cloud
+- reduced attack surface (no build tooling in final image)
 
-1. Start in detach mode:
+### Size Comparison
 
-```shell
+Measured on March 28, 2026 with:
+
+```bash
+docker build -f Dockerfile.single -t cryptopulse:single .
+docker build -t cryptopulse:optimized .
+docker images | grep cryptopulse
+```
+
+Result:
+- Original image (`cryptopulse:single`): `168MB`
+- Multi-stage image (`cryptopulse:optimized`): `168MB`
+
+## Architecture Summary
+
+Compose stack has 3 containers:
+- `nginx` - reverse proxy, exposed on host `http://localhost:8080`
+- `crypto-api` - Flask API service (internal port `5000`)
+- `postgres` - PostgreSQL database with persistent named volume `postgres_data`
+
+Traffic flow:
+1. User sends request to `localhost:8080`
+2. Nginx proxies request to `crypto-api:5000`
+3. API reads/writes data in PostgreSQL (`postgres:5432`)
+4. DB data persists in Docker volume `postgres_data`
+
+## Run Instructions
+
+1. Clone repository and enter folder:
+
+```bash
+git clone <your-repo-url>
+cd CryptoPulse
+```
+
+2. Build and start all services:
+
+```bash
 docker compose up --build -d
 ```
 
-2. Check app:
+3. Check endpoints:
 
-- http://127.0.0.1:5000/api/v1/health //output JSON
-- http://127.0.0.1:5000/api/v1/crypto //output JSON
-- http://127.0.0.1:5000/api/v1/dashboard
+- `http://localhost:8080/api/v1/health`
+- `http://localhost:8080/api/v1/crypto`
+- `http://localhost:8080/api/v1/dashboard`
 
-3. Stop app:
+4. Stop and remove stack:
 
-```shell
+```bash
 docker compose down
 ```
 
-## Database
-
-SQLite file path in container: `/app/data/crypto.db`.
-Table: `crypto_results`.
-
-## Database Endpoints
-
-- `POST /api/v1/crypto/results`  //write the current record manually 
-- `GET /api/v1/crypto/results?limit=20` //read the last 20 records
-
-
-## Example CRUD Requests
-
-Create row: (manual mode)
+5. Stop and remove stack + DB volume (full reset):
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/v1/crypto/results \
-  -H "Content-Type: application/json" \
-  -d "{\"bitcoin_usd\": 68950.10, \"ethereum_usd\": 3550.00, \"litecoin_usd\": 85.40, \"source\": \"manual-test\"}"
+docker compose down -v
 ```
-
-Read rows: (limit 10 records)
-
-```bash
-curl "http://127.0.0.1:5000/api/v1/crypto/results?limit=10"
-```
-
-## Docker Optimization
-
-`docker history cryptopulse:optimized` output after restructuring layers:
-
-```text
-IMAGE          CREATED    CREATED BY                                       SIZE      COMMENT
-693c52d47bf2   recent     /bin/sh -c #(nop)  CMD ["python" "app.py"]      0B
-7abe3c8740d3   recent     /bin/sh -c #(nop)  EXPOSE 5000                   0B
-05a99518fa94   recent     /bin/sh -c mkdir -p /app/data                    0B
-01590e4b875d   recent     /bin/sh -c #(nop) COPY dir:9b2c205b2aee47...     19.3MB
-a9dfa1919e1a   recent     /bin/sh -c pip install --no-cache-dir -r req...  7.7MB
-40ddd9021481   recent     /bin/sh -c #(nop) COPY file:f71d6f9255c1088b...  46B
-9e7881e754d6   recent     /bin/sh -c #(nop) WORKDIR /app                   0B
-190b2ace1b35   recent     /bin/sh -c #(nop)  ENV PYTHONUNBUFFERED=1        0B
-a9c7f7b54f9c   recent     /bin/sh -c #(nop)  ENV PYTHONDONTWRITEBYTECO...  0B
-fb1118f126b5   8 days ago CMD ["python3"]                                  0B        buildkit.dockerfile.v0
-```
-
-Placing `COPY requirements.txt ./` before `COPY . .` lets Docker cache the dependency-install layer independently from application source changes. As a result, if you only change Python code but not dependencies, Docker reuses the cached `pip install` layer instead of reinstalling packages. This significantly reduces rebuild time during active development.

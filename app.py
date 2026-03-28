@@ -1,12 +1,12 @@
 import os
-import sqlite3
 import threading
 import time
-from pathlib import Path
 from datetime import datetime, timezone
 
+import psycopg2
 import requests
 from flask import Flask, jsonify, redirect, render_template_string, request, url_for
+from psycopg2.extras import RealDictCursor
 
 
 # Env/bootstrap: load local .env values once before app config.
@@ -32,7 +32,10 @@ load_env_file()
 app = Flask(__name__)
 APP_ENV = os.getenv("APP_ENV")
 API_KEY = os.getenv("API_KEY")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "data/crypto.db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@postgres:5432/cryptopulse",
+)
 AUTO_SAVE_INTERVAL_SECONDS = int(os.getenv("AUTO_SAVE_INTERVAL_SECONDS", "300"))
 AUTO_SAVE_SOURCE = "auto"
 
@@ -41,37 +44,49 @@ _auto_writer_started = False
 _auto_writer_lock = threading.Lock()
 
 
-# Database: connection and schema helpers for SQLite.
+# Database: connection and schema helpers for PostgreSQL.
 def get_db_connection():
-    # Ensure DB directory exists and return sqlite connection with dict-like rows.
-    Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # Open DB connection and use dict-like rows for easier serialization.
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 
 def init_db():
-    # Create table once; safe to call on every app startup.
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS crypto_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bitcoin_usd REAL NOT NULL,
-                ethereum_usd REAL NOT NULL,
-                litecoin_usd REAL NOT NULL,
-                average_usd REAL NOT NULL,
-                spread_usd REAL NOT NULL,
-                highest TEXT NOT NULL,
-                source TEXT NOT NULL DEFAULT 'manual',
-                created_at TEXT NOT NULL
+    # Create table once; retry briefly to tolerate DB startup race.
+    retries = 10
+    for attempt in range(1, retries + 1):
+        try:
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS crypto_results (
+                            id SERIAL PRIMARY KEY,
+                            bitcoin_usd DOUBLE PRECISION NOT NULL,
+                            ethereum_usd DOUBLE PRECISION NOT NULL,
+                            litecoin_usd DOUBLE PRECISION NOT NULL,
+                            average_usd DOUBLE PRECISION NOT NULL,
+                            spread_usd DOUBLE PRECISION NOT NULL,
+                            highest VARCHAR(20) NOT NULL,
+                            source VARCHAR(50) NOT NULL DEFAULT 'manual',
+                            created_at TIMESTAMPTZ NOT NULL
+                        )
+                        """
+                    )
+                conn.commit()
+                return
+            finally:
+                conn.close()
+        except psycopg2.OperationalError as exc:
+            if attempt == retries:
+                raise
+            app.logger.warning(
+                "Database not ready yet (attempt %s/%s): %s",
+                attempt,
+                retries,
+                exc,
             )
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+            time.sleep(2)
 
 
 def build_metrics(btc_usd, eth_usd, ltc_usd):
@@ -84,7 +99,11 @@ def build_metrics(btc_usd, eth_usd, ltc_usd):
 
 
 def row_to_result(row):
-    # Normalize sqlite row shape into API-friendly JSON.
+    # Normalize DB row shape into API-friendly JSON.
+    created_at = row["created_at"]
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
+
     return {
         "id": row["id"],
         "prices": {
@@ -129,45 +148,47 @@ def save_crypto_snapshot(btc_usd, eth_usd, ltc_usd, source="manual"):
     # Save one snapshot row and return payload metadata for API responses.
     metrics = build_metrics(btc_usd, eth_usd, ltc_usd)
     source = str(source or "manual")[:50]
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(timezone.utc)
 
     conn = get_db_connection()
     try:
-        cursor = conn.execute(
-            """
-            INSERT INTO crypto_results (
-                bitcoin_usd,
-                ethereum_usd,
-                litecoin_usd,
-                average_usd,
-                spread_usd,
-                highest,
-                source,
-                created_at
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crypto_results (
+                    bitcoin_usd,
+                    ethereum_usd,
+                    litecoin_usd,
+                    average_usd,
+                    spread_usd,
+                    highest,
+                    source,
+                    created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    btc_usd,
+                    eth_usd,
+                    ltc_usd,
+                    metrics["average_usd"],
+                    metrics["spread_usd"],
+                    metrics["highest"],
+                    source,
+                    created_at,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                btc_usd,
-                eth_usd,
-                ltc_usd,
-                metrics["average_usd"],
-                metrics["spread_usd"],
-                metrics["highest"],
-                source,
-                created_at,
-            ),
-        )
+            inserted = cursor.fetchone()
         conn.commit()
-        created_id = cursor.lastrowid
     finally:
         conn.close()
 
     return {
-        "id": created_id,
+        "id": inserted["id"],
         "metrics": metrics,
         "source": source,
-        "created_at": created_at,
+        "created_at": inserted["created_at"].isoformat(),
     }
 
 
@@ -178,7 +199,7 @@ def auto_save_crypto_loop():
         try:
             btc_usd, eth_usd, ltc_usd = fetch_crypto_prices()
             save_crypto_snapshot(btc_usd, eth_usd, ltc_usd, source=AUTO_SAVE_SOURCE)
-        except (requests.RequestException, ValueError, sqlite3.Error) as exc:
+        except (requests.RequestException, ValueError, psycopg2.Error) as exc:
             app.logger.warning("Auto-save cycle failed: %s", exc)
         time.sleep(AUTO_SAVE_INTERVAL_SECONDS)
 
@@ -644,24 +665,26 @@ def list_crypto_results():
 
     conn = get_db_connection()
     try:
-        rows = conn.execute(
-            """
-            SELECT
-                id,
-                bitcoin_usd,
-                ethereum_usd,
-                litecoin_usd,
-                average_usd,
-                spread_usd,
-                highest,
-                source,
-                created_at
-            FROM crypto_results
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    bitcoin_usd,
+                    ethereum_usd,
+                    litecoin_usd,
+                    average_usd,
+                    spread_usd,
+                    highest,
+                    source,
+                    created_at
+                FROM crypto_results
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
     finally:
         conn.close()
 
