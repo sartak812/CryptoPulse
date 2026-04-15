@@ -1,4 +1,4 @@
-# AWS Deployment Proof (HW15)
+clear# AWS Deployment Proof (HW15)
 
 ## EC2 Info
 

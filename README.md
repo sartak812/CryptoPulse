@@ -106,13 +106,3 @@ aws s3 ls
 
 Expected output includes:
 - `project-genesis-assets-artsargsyan-715926`
-
-### Lesson 16 Evidence
-
-Place the following screenshots in:
-- `docs/lesson16/`
-
-Required files:
-- `docs/lesson16/root-mfa-enabled.png` (IAM Console: root account MFA enabled)
-- `docs/lesson16/admin-user-exists.png` (IAM Console: admin user exists)
-- `docs/lesson16/aws-s3-ls-bucket.png` (Terminal: `aws s3 ls` showing the new bucket)
