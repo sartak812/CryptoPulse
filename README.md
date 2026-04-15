@@ -32,6 +32,22 @@ cd CryptoPulse
 docker compose up --build -d
 ```
 
+### One-command AWS EC2 deploy (from local PowerShell)
+
+If you already created an EC2 Ubuntu instance and opened inbound ports `22`, `80`, `443`, run:
+
+```powershell
+.\scripts\deploy-ec2.ps1 -PublicIp <EC2_PUBLIC_IP> -KeyPath C:\path\to\your-key.pem
+```
+
+This script will:
+- connect over SSH
+- install `git`, `docker`, `docker compose`
+- clone/pull this repository on EC2
+- switch nginx host port mapping from `8080:80` to `80:80`
+- run `sudo docker compose up --build -d`
+- print `docker ps` plus public URLs
+
 3. Check endpoints:
 
 - `http://localhost:8080/api/v1/health`
@@ -70,3 +86,33 @@ Read rows (limit 10 records):
 ```bash
 curl "http://127.0.0.1:8080/api/v1/crypto/results?limit=10"
 ```
+
+## Cloud Security & Storage
+
+### AWS CLI + S3 Verification
+
+Configured AWS CLI defaults:
+- Region: `us-east-1`
+- Output: `json`
+
+Created S3 bucket:
+- `project-genesis-assets-artsargsyan-715926`
+
+Verification command:
+
+```bash
+aws s3 ls
+```
+
+Expected output includes:
+- `project-genesis-assets-artsargsyan-715926`
+
+### Lesson 16 Evidence
+
+Place the following screenshots in:
+- `docs/lesson16/`
+
+Required files:
+- `docs/lesson16/root-mfa-enabled.png` (IAM Console: root account MFA enabled)
+- `docs/lesson16/admin-user-exists.png` (IAM Console: admin user exists)
+- `docs/lesson16/aws-s3-ls-bucket.png` (Terminal: `aws s3 ls` showing the new bucket)
