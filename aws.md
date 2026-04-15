@@ -29,6 +29,7 @@ crypto-pulse-postgres   postgres:16-alpine       Up 6 minutes (healthy)   5432/t
 ## 3) Frontend via Public IP
 
 - URL: `http://98.91.234.229/api/v1/dashboard`
+- Submission note: `Updated for PR on 2026-04-15`
 
 ![Frontend Dashboard](Screenshots/UI%20Dashboard.jpg)
 
