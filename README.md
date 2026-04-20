@@ -106,4 +106,3 @@ aws s3 ls
 
 Expected output includes:
 - `project-genesis-assets-artsargsyan-715926`
-
