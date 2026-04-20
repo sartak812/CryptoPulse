@@ -33,15 +33,7 @@ crypto-pulse-postgres   postgres:16-alpine       Up 6 minutes (healthy)   5432/t
 
 ![Frontend Dashboard](Screenshots/UI%20Dashboard.jpg)
 
-## Screenshot Embeds (add/replace with final browser+terminal captures)
 
-Use these names for final submission files:
-
-- `Screenshots/aws-docker-ps.png`
-- `Screenshots/aws-backend-health.png`
-- `Screenshots/aws-frontend-dashboard.png`
-
-Then keep these embeds in this file:
 
 ![AWS Docker PS](Screenshots/aws-docker-ps.png)
 
