@@ -9,6 +9,7 @@ data/
 .terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfvars
 crash.log
 crash.*.log
 override.tf
