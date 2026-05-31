@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  host: genesis-dev.local
+
+config:
+  dbHost: "postgres-service"
+  appEnv: "development"
+  logLevel: "debug"

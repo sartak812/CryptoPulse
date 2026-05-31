@@ -1,0 +1,24 @@
+replicaCount: 2
+
+image:
+  repository: nginx
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  host: genesis.local
+
+config:
+  dbHost: "postgres-service"
+  appEnv: "production"
+  logLevel: "info"
+
+db:
+  secretName: genesis-db-creds
+  username: "YWRtaW4="
+  password: "cGFzc3dvcmQ="
