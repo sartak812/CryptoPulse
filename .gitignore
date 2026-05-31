@@ -9,6 +9,8 @@ data/
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfstate.backup
+*.tfvars
 terraform.tfvars
 crash.log
 crash.*.log
