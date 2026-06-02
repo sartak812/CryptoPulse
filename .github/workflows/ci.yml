@@ -11,7 +11,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify tools
+        shell: powershell
         run: |
+          $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
+          $env:Path += ";C:\Users\artsargsyan\AppData\Local\Microsoft\WinGet\Packages\Helm.Helm_Microsoft.Winget.Source_8wekyb3d8bbwe\windows-amd64"
           echo "Hello from self-hosted runner!"
           docker --version
           kubectl version --client
