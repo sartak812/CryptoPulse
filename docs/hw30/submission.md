@@ -10,6 +10,8 @@
 docker pull sartak812/genesis:latest
 ```
 
+![DockerHub latest tag evidence](./dockerhub-latest-tag.png)
+
 ## GitHub Actions
 
 - Workflow: `Genesis CI/CD`
