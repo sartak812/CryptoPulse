@@ -2,6 +2,8 @@ name: Genesis CI/CD
 
 on:
   push:
+    branches: [main, hw30]
+  pull_request:
     branches: [main]
 
 jobs:
