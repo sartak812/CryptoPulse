@@ -1,0 +1,18 @@
+name: Genesis CI
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  hello-runner:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tools
+        run: |
+          echo "Hello from self-hosted runner!"
+          docker --version
+          kubectl version --client
+          helm version
