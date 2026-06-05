@@ -12,6 +12,9 @@ data/
 *.tfstate.backup
 *.tfvars
 terraform.tfvars
+*kubeconfig*
+kubeconfig
+.kube/
 crash.log
 crash.*.log
 override.tf
