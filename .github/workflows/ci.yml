@@ -16,15 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python dependencies
-        shell: powershell
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+      - name: Build test image
+        shell: bash
+        run: docker build -t "genesis-test:${IMAGE_TAG}" .
 
       - name: Run syntax checks
-        shell: powershell
-        run: python -m compileall app.py
+        shell: bash
+        run: docker run --rm --entrypoint python "genesis-test:${IMAGE_TAG}" -m compileall app.py
 
   build:
     runs-on: self-hosted
