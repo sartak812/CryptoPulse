@@ -83,10 +83,19 @@ jobs:
         shell: bash
         env:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          KUBE_SERVER: ${{ secrets.KUBE_SERVER }}
         run: |
           if [ -n "${KUBE_CONFIG}" ]; then
             mkdir -p "${HOME}/.kube"
-            echo "${KUBE_CONFIG}" | base64 -d > "${HOME}/.kube/config"
+            if echo "${KUBE_CONFIG}" | grep -q "apiVersion:"; then
+              echo "${KUBE_CONFIG}" > "${HOME}/.kube/config"
+            else
+              echo "${KUBE_CONFIG}" | base64 -d > "${HOME}/.kube/config"
+            fi
+            if [ -n "${KUBE_SERVER}" ]; then
+              cluster_name="$(kubectl config view -o jsonpath='{.contexts[0].context.cluster}')"
+              kubectl config set-cluster "${cluster_name}" --server="${KUBE_SERVER}"
+            fi
           elif [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]; then
             kubectl config set-cluster minikube \
               --server="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}" \
@@ -102,6 +111,7 @@ jobs:
             echo "KUBE_CONFIG secret is not set and no in-cluster service account token was found."
             exit 1
           fi
+          kubectl cluster-info
 
       - name: Apply Kubernetes manifests
         shell: bash
