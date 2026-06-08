@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genesis
+  namespace: genesis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: genesis
+  template:
+    metadata:
+      labels:
+        app: genesis
+    spec:
+      containers:
+      - name: genesis
+        image: dhi.io/nginx:1-debian-dev
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: genesis
+  namespace: genesis
+spec:
+  selector:
+    app: genesis
+  ports:
+  - port: 80
+    targetPort: 8080
