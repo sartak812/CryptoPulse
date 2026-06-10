@@ -20,6 +20,6 @@ spec:
     spec:
       containers:
         - name: genesis
-          image: nginx:latest
+          image: genesis:latest
           ports:
-            - containerPort: 80
+            - containerPort: 5000

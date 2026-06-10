@@ -2,27 +2,129 @@ name: Genesis CI/CD
 
 on:
   push:
-    branches: [main, hw30]
+    branches: [main, hw31]
   pull_request:
     branches: [main]
 
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/genesis
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
-  build-and-push:
+  test:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
+      - name: Build test image
+        shell: bash
+        run: docker build -t "genesis-test:${IMAGE_TAG}" .
+
+      - name: Run syntax checks
+        shell: bash
+        run: docker run --rm --entrypoint python "genesis-test:${IMAGE_TAG}" -m compileall app.py
+
+  build:
+    runs-on: self-hosted
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        shell: bash
+        run: docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+
+      - name: Save Docker image artifact
+        shell: bash
+        run: docker save "${IMAGE_NAME}:${IMAGE_TAG}" -o genesis-image.tar
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-image
+          path: genesis-image.tar
+          retention-days: 1
+
+  push:
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: genesis-image
+
+      - name: Load Docker image
+        shell: bash
+        run: docker load -i genesis-image.tar
 
       - name: Login to DockerHub
         shell: bash
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
-      - name: Build Docker image
-        shell: bash
-        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/genesis:${{ github.sha }} .
-
       - name: Push Docker image
         shell: bash
+        run: docker push "${IMAGE_NAME}:${IMAGE_TAG}"
+
+      - name: Push latest tag
+        shell: bash
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/genesis:${{ github.sha }}
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/genesis:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/genesis:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/genesis:latest
+          docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${IMAGE_NAME}:latest"
+          docker push "${IMAGE_NAME}:latest"
+
+  deploy:
+    runs-on: self-hosted
+    needs: push
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubectl inside cluster
+        shell: bash
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          KUBE_SERVER: ${{ secrets.KUBE_SERVER }}
+        run: |
+          if [ -n "${KUBE_CONFIG}" ]; then
+            mkdir -p "${HOME}/.kube"
+            if echo "${KUBE_CONFIG}" | grep -q "apiVersion:"; then
+              echo "${KUBE_CONFIG}" > "${HOME}/.kube/config"
+            else
+              echo "${KUBE_CONFIG}" | base64 -d > "${HOME}/.kube/config"
+            fi
+            if [ -n "${KUBE_SERVER}" ]; then
+              cluster_name="$(kubectl config view -o jsonpath='{.contexts[0].context.cluster}')"
+              kubectl config set-cluster "${cluster_name}" --server="${KUBE_SERVER}"
+            fi
+          elif [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]; then
+            kubectl config set-cluster minikube \
+              --server="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}" \
+              --certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            kubectl config set-credentials github-actions \
+              --token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+            kubectl config set-context minikube \
+              --cluster=minikube \
+              --user=github-actions \
+              --namespace=default
+            kubectl config use-context minikube
+          else
+            echo "KUBE_CONFIG secret is not set and no in-cluster service account token was found."
+            exit 1
+          fi
+          kubectl cluster-info
+
+      - name: Apply Kubernetes manifests
+        shell: bash
+        run: kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
+
+      - name: Update deployment image
+        shell: bash
+        run: kubectl set image deployment/genesis-deployment genesis="${IMAGE_NAME}:${IMAGE_TAG}" --namespace default
+
+      - name: Wait for rollout
+        shell: bash
+        run: kubectl rollout status deployment/genesis-deployment --namespace default --timeout=120s
+
+      - name: Show Genesis pods
+        shell: bash
+        run: kubectl get pods --namespace default -l app=genesis -o wide
